@@ -1,28 +1,29 @@
 import random
 import math
-
+import time
 class GridEnvironment:
     def __init__(self, grid_size, start, goal):
         self.grid_size = grid_size
         self.start = start
         self.goal = goal
+        
 
     def get_possible_moves(self, state):
         moves = []
         x, y = state
-        if x > 0 and x< self.grid_size-1:
+        if x > 0 and x < self.grid_size - 1:
             moves.append('left')
             moves.append("right")
-        elif x==0:
+        elif x == 0:
             moves.append("right")
-        elif x==self.grid_size:
+        elif x == self.grid_size - 1:  # Changed from self.grid_size
             moves.append("left")
-        if y > 0 and y< self.grid_size-1:
+        if y > 0 and y < self.grid_size - 1:
             moves.append('down')
             moves.append("up")
-        elif y==0:
+        elif y == 0:
             moves.append("up")
-        elif x==self.grid_size:
+        elif y == self.grid_size - 1:  # Changed from x == self.grid_size
             moves.append("down")
         return moves
 
@@ -54,20 +55,24 @@ class Node:
         self.parent = None
 
 class MCTSr:
-    def __init__(self, initial_state, refinement_frequency, evaluation_function, environment):
+    def __init__(self, initial_state, refinement_frequency, evaluation_function, environment,time_limit=60):
         self.root = Node(state=initial_state)
         self.refinement_frequency = refinement_frequency
         self.evaluation_function = evaluation_function
         self.environment = environment
         self.iteration_count = 0
+        self.start_time = time.time()
+        self.time_limit = time_limit
 
     def selection(self, node):
         """ Select the best child node based on UCT """
         print("Selection")
         while node.children:
-            print("Parent is",node.state)
-            node = max(node.children, key=lambda n: self.uct_value(node, n))
-            print("Max node",node.state)
+            print("Parent is", node.state)
+            max_uct = max(self.uct_value(node, child) for child in node.children)
+            best_children = [child for child in node.children if self.uct_value(node, child) == max_uct]
+            node = random.choice(best_children)
+            print("Max node", node.state)
         print(f"End of selection\n")
         return node
 
@@ -83,24 +88,25 @@ class MCTSr:
         moves = self.environment.get_possible_moves(node.state)
         for move in moves:
             new_state = self.environment.apply_move(node.state, move)
-            print(f"parent node {node.state} new state {new_state}")
-            new_node = Node(state=new_state)
-            new_node.parent = node
-            node.children.append(new_node)
+            if not any(child.state == new_state for child in node.children):
+                print(f"parent node {node.state} new state {new_state}")
+                new_node = Node(state=new_state)
+                new_node.parent = node
+                node.children.append(new_node)
         for child in node.children:
-            print(f"parent node is {node.state}",child.state)
+            print(f"parent node is {node.state}", child.state)
         return node.children
 
     def simulation(self, node):
-        """ Simulate a random play to get a value """
         state = node.state
-        # Simulate random steps until a terminal state is reached
-        while not self.environment.is_terminal(state):
+        steps = 0
+        max_steps = 100  # Limit the number of steps in simulation
+        while not self.environment.is_terminal(state) and steps < max_steps:
             moves = self.environment.get_possible_moves(state)
             if not moves:
                 break
             state = self.environment.apply_move(state, random.choice(moves))
-            print(f"simulated move for {node.state}, applied is {state}")
+            steps += 1
         return self.evaluation_function(state)
 
     def backpropagation(self, node, value):
@@ -122,22 +128,25 @@ class MCTSr:
 
     def search(self):
         """ Perform MCTSr search """
+        best_state = self.root.state
+        best_value = float('-inf')
         while not self.search_finished():
             selected_node = self.selection(self.root)
-            print("selected node is",selected_node.state)
+            if self.environment.is_terminal(selected_node.state):
+                return selected_node.state
             expanded_nodes = self.expansion(selected_node)
-            print("Expanded nodes are")
-            print(expanded_node.state  for expanded_node in expanded_nodes)
             for node in expanded_nodes:
                 value = self.simulation(node)
                 self.backpropagation(node, value)
+                if value > best_value:
+                    best_value = value
+                    best_state = node.state
             self.iteration_count += 1
             if self.iteration_count % self.refinement_frequency == 0:
                 self.self_refinement()
-        return self.best_action()
-
+        return best_state
     def search_finished(self):
-        return self.iteration_count >= 1000
+        return self.iteration_count >= 2000 or (time.time() - self.start_time) > self.time_limit
 
     def best_action(self):
         #  Return the best action from the root node 
@@ -151,12 +160,16 @@ class MCTSr:
 if __name__ == "__main__":
     grid_size = 5
     start = (0, 0)
-    goal = (4, 0)
+    goal = (4, 4)
     environment = GridEnvironment(grid_size, start, goal)
 
     refinement_frequency = 100
     evaluation_function = lambda state: -environment.distance_to_goal(state)
-    mctsr = MCTSr(initial_state=start, refinement_frequency=refinement_frequency, evaluation_function=evaluation_function, environment=environment)
+    mctsr = MCTSr(initial_state=start, refinement_frequency=refinement_frequency, evaluation_function=evaluation_function, environment=environment, time_limit=60)
 
     best_state = mctsr.search()
     print(f"Best state: {best_state}")
+    print(f"Goal state: {goal}")
+    print(f"Distance to goal: {environment.distance_to_goal(best_state)}")
+    print(f"Total iterations: {mctsr.iteration_count}")
+    print(f"Total time: {time.time() - mctsr.start_time:.2f} seconds")
